@@ -5,12 +5,18 @@ FAT_CAT (VERSION 1)
 Takes a tree (T-), msa (MSA-) and sequence (S) as input.
 Builds hmms at every interior node of T-.
 Scores S agianst every hmm
-Inserts S above the node corresponding to the highest scoring hmm.
-Optmizes the branch lengths of the new tree (T- + S)
-Aligns S to the highest scoing hmm = S*
-Concatenates S* to the root MSA ie MSA- + S*
-Outputs final.newick = (T- + S)
-        final.aln = (MSA- + S*) 
+Inserts S above the node corresponding to the highest scoring hmm to give T+
+Optmizes the branch lengths of T+ to give T+o
+Aligns S to the highest scoing hmm = Sa
+Aligns S to the root HMM = Sar
+Concatenates Sa to MSA- to give MSA+
+For validation purposes make a tree from MSA+  = Tn
+and makes a tree from (MSA- + Sar) = Ts
+Outputs tree_plus.newick = T+
+        tree_plus_o.newick = T+o
+        msa_plus.aln = MSA+
+        tree_n.newick = Tn
+        tree_s.newick = Ts
 
 '''
 import os
@@ -35,23 +41,26 @@ def option_parser():
     description = 'Fast Approximate Tree classifiCATion. FAT CATs are better than SKINNY CATs.'
     usage = "usage: %prog [options] -t treeFile -m msaFile -s seqFile -o dirName"
     parser = optparse.OptionParser(usage=usage, description=description)
-    parser.add_option('-t', help='Path to the tree file (newick-formatted)', dest='t',
-                      action='store', metavar="test.newick")
-    parser.add_option('-a', help='Path to the alignment msa file (FastA format)', dest='a',
-                      action='store', metavar="test.msa")
-    parser.add_option('-s', help='Path to the sequence file (unaligned FastA format)', dest='s',
-                      action='store', metavar="test.seq")
-    parser.add_option('-o', help='Output directory', dest='o',
-                      action='store', metavar="testDir")
-    if len(sys.argv)==1:
-        parser.print_help()
+    parser.add_option('-t', help='Path to the tree file (Newick format)', dest='t',
+                      action='store', metavar="<tree file>")
+    parser.add_option('-a', help='Path to the alignment file (Fasta format)', dest='a',
+                      action='store', metavar="<alignment file>")
+    parser.add_option('-s', help='Path to the sequence file (unaligned Fasta format)', dest='s',
+                      action='store', metavar="<sequence file>")
+    parser.add_option('-o', help='Output directory name', dest='o',
+                      action='store', metavar="<DIR>")
+    parser.add_option('-v', help='Make trees for validation experiments', dest='v',
+                      default=False, action='store_true')
+    #if len(sys.argv)==1:
+    #   parser.print_help()
     return parser
 
-def insert_sequence(pt,highest_node,seq, base,aln_name,final_dir):
+def insert_sequence(pt,highest_node,seq, base,aln_name,final_dir,tree_dir):
     '''
     Inserts sequence above the highest scoring node
     '''
     print 'insert_sequence: Before'
+    print pt
     seq_handle = open(seq,'r')
     record = SeqIO.parse(seq_handle,"fasta").next()
     
@@ -72,27 +81,44 @@ def insert_sequence(pt,highest_node,seq, base,aln_name,final_dir):
     
     # outputs a new tree
     print 'insert_sequence: After'
-    pt.write(outfile='%sfinal_inserted.newick' % final_dir)
+    pt.write(outfile='%stree_plus.newick' % tree_dir)
     print pt
         
     # aligns the new sequence to the the HMM
     tree_dir = './%s_fat_cat' % base
     hmm_dir = '%s/hmm/' % tree_dir
     check_call(['hmmalign', '--allcol', '--informat', 'FASTA', '--amino', '--outformat', 'A2M',
-          '--trim', '-o', '%sfinal_inserted.aln' % final_dir,
+          '--trim', '-o', '%smsa_plus.aln' % final_dir,
           '%s%s.hmm' % (hmm_dir, highest_node),
           seq])
-    os.system('cat %s >> %sfinal_inserted.aln' % (aln_name, final_dir))
+    os.system('cat %s >> %smsa_plus.aln' % (aln_name, final_dir))
+    
+    
 
-def optimize_branch_lengths_fasttree(final_dir):
+def validation_trees(final_dir,tree_dir,msa_dir,hmm_dir,seq):
+    '''
+    Make Tn and Ts for validation
+    '''
+    # Make Tn
+    os.system('FastTree %smsa_plus.aln > %stree_n.newick' % (final_dir,tree_dir))
+    
+    #make msa(s) (align sequence to root node and add it to the root alignment)
+    check_call(['hmmalign', '--allcol', '--informat', 'FASTA', '--amino', '--mapali','%snode0.stockholm' % hmm_dir, '--outformat', 'A2M',
+          '--trim', '-o', '%smsa_s.aln' % msa_dir,
+          '%snode0.hmm' % (hmm_dir),
+          seq])
+    #make Ts
+    os.system('FastTree %smsa_s.aln > %stree_s.newick' % (msa_dir,tree_dir))
+
+def optimize_branch_lengths_fasttree(tree_dir,final_dir):
     '''
     Uses FastTree to optimize branch lengths
     FastTree options:
      -nome -mllen with -intree to optimize branch lengths for a fixed topology
     '''
-    input_aln = '%sfinal_inserted.aln' % final_dir
-    input_tree = '%sfinal_inserted.newick' % final_dir
-    output_tree = "%sfinal_FastTree_optimized.newick" % final_dir
+    input_aln = '%smsa_plus.aln' % final_dir
+    input_tree = '%stree_plus.newick' % tree_dir
+    output_tree = "%stree_plus_o.newick" % final_dir
     os.system('FastTree -nome -mllen -intree %s %s > %s' % (input_tree, input_aln, output_tree))
     
 def optimize_branch_lengths_raxml(final_dir,base,msa_dir,tree_dir):
@@ -261,9 +287,14 @@ def main():
     aln_name = opt.a
     seq_name = opt.s
     base = opt.o
+    validation = opt.v
+    
     if not (tree_name and aln_name and seq_name):
+        print '\n'
         parser.print_help()
-        print 'Error: Not all inputs have been provided'
+        print '\n'
+        print 'Error: Not all required inputs have been provided'
+        print '\n'        
         return
     # Clean up and create directories for node msa and hmm files
     main_dir = './%s_fat_cat' % base
@@ -278,8 +309,10 @@ def main():
     
     pt = build_hmm_from_tree(base,tree_name,aln_name,msa_dir,hmm_dir)
     highest_node = score_sequence(seq_name, base,hmm_dir) 
-    insert_sequence(pt,highest_node, seq_name,base, aln_name,final_dir)
-    optimize_branch_lengths_fasttree(final_dir)
+    insert_sequence(pt,highest_node, seq_name,base, aln_name,final_dir,tree_dir)
+    optimize_branch_lengths_fasttree(tree_dir,final_dir)
+    if validation:
+        validation_trees(final_dir,tree_dir,msa_dir,hmm_dir,seq_name)
     #optimize_branch_lengths_raxml(final_dir,base,msa_dir,tree_dir)
     #unmap_files(msa_dir,final_dir)
     print highest_node

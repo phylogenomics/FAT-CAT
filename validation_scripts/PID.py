@@ -1,19 +1,10 @@
 '''
 A utility function to return percent id based closest match to every sequence in the msa.
-
-Call this function by
->> from validation_scripts import get_percent_identity as gpi
-
-To run the whole alignment file
->> output = gpi.main("gpcr_nr95gc50_mafft.fasta")
-The output should look like this
-[(id of seq1 in msa, id of closest id match to seq1 in msa, percent identity),
-...
-]
-
-To run a single id against the whole file
->> output = gpi.get_hpid_by_id(r"gi|110832828|sp|Q95136.2|DRD1_BOVIN/1-446", "gpcr_nr95gc50_mafft.fasta")
-
+>> from validation_scripts import PID
+>> hpid = PID.Highest_PID_Match("gpcr_nr95gc50_mafft.fasta")
+>> closest_seq_details = hpid.get_hpid_by_id("gi|110832828|sp|Q95136.2|DRD1_BOVIN/1-446")
+# or for the entire dictionary
+>> seq_details = hpid.highest_pid_dict
 '''
 
 import os
